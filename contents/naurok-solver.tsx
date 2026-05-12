@@ -54,10 +54,23 @@ function FloatingPanel() {
   )
 
   useEffect(() => {
-    getSettings().then((s) => {
-      setSettings(s)
-      setSettingsLoaded(true)
-    })
+    getSettings()
+      .then((s) => {
+        setSettings(s)
+        setSettingsLoaded(true)
+      })
+      .catch(() => {
+        // Fallback: request settings from background worker
+        chrome.runtime.sendMessage(
+          { type: "GET_SETTINGS" },
+          (response) => {
+            if (response?.settings) {
+              setSettings(response.settings)
+            }
+            setSettingsLoaded(true)
+          }
+        )
+      })
   }, [])
 
   const locale = t(settings.locale)
