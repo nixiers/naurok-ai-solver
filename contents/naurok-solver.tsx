@@ -1,6 +1,6 @@
 import cssText from "data-text:~styles/content.css"
 import type { PlasmoCSConfig, PlasmoGetStyle } from "plasmo"
-import React, { useCallback, useEffect, useState } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 
 import { humanLikeBehavior } from "~lib/anti-detect"
 import { applyResult, clearHighlights } from "~lib/highlighter"
@@ -103,7 +103,11 @@ function FloatingPanel() {
         applyResult(question, result, true, settings.antiDetection)
 
         return {
-          question,
+          question: {
+            ...question,
+            element: null,
+            options: question.options.map((o) => ({ ...o, element: null }))
+          },
           result,
           timestamp: Date.now(),
           testUrl: window.location.href
@@ -118,12 +122,20 @@ function FloatingPanel() {
     [settings]
   )
 
+  const solvingRef = useRef(false)
+
   const solveAll = useCallback(async () => {
+    if (solvingRef.current) return
+    solvingRef.current = true
+
     let qs = questions
     if (qs.length === 0) {
       qs = scanQuestions()
     }
-    if (qs.length === 0) return
+    if (qs.length === 0) {
+      solvingRef.current = false
+      return
+    }
 
     setProgress({ current: 0, total: qs.length, status: "solving" })
     clearHighlights()
@@ -166,6 +178,7 @@ function FloatingPanel() {
       solvedQuestions: solved.length
     }
     addHistoryEntry(historyEntry)
+    solvingRef.current = false
   }, [questions, scanQuestions, settings, solveOneQuestion])
 
   useEffect(() => {
