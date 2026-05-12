@@ -132,7 +132,8 @@ function FloatingPanel() {
           }
         )
 
-        applyResult(question, result, true, settings.antiDetection)
+        const isLive = isLiveTestingPage()
+        applyResult(question, result, !isLive, settings.antiDetection)
 
         return {
           question: {
@@ -161,74 +162,64 @@ function FloatingPanel() {
     const totalQuestions = liveProgress?.total || 0
     setProgress({ current: 0, total: totalQuestions, status: "solving" })
     clearHighlights()
-    setSolvedQuestions([])
 
-    const solved: SolvedQuestion[] = []
-    const maxIterations = totalQuestions > 0 ? totalQuestions : 100
-
-    for (let i = 0; i < maxIterations; i++) {
-      await new Promise((r) => setTimeout(r, 800))
-
-      const qs = parseQuestions()
-      if (qs.length === 0) {
-        const sceneEnd = document.querySelector('.test-container-inner[ng-show="test.scene == 3"]')
-        if (sceneEnd && window.getComputedStyle(sceneEnd).display !== "none") break
-
-        const endHeading = document.querySelector(".message_scene.ended")
-        if (endHeading) break
-
-        await new Promise((r) => setTimeout(r, 500))
-        continue
-      }
-
-      const currentQ = qs[0]
+    const qs = parseQuestions()
+    if (qs.length === 0) {
       setProgress({
-        current: i,
-        total: totalQuestions || i + 1,
-        status: "solving",
-        currentQuestion: currentQ.text.substring(0, 50)
+        current: 0,
+        total: totalQuestions,
+        status: "error",
+        error: locale.noQuestions
       })
-
-      if (settings.antiDetection && i > 0) {
-        await humanLikeBehavior(settings.minDelay, settings.maxDelay)
-      }
-
-      const result = await solveOneQuestion(currentQ)
-      if (result) {
-        solved.push(result)
-        setSolvedQuestions([...solved])
-      }
-
-      setProgress({
-        current: i + 1,
-        total: totalQuestions || i + 1,
-        status: "solving"
-      })
-
-      await new Promise((r) => setTimeout(r, 1500))
-
-      const progress2 = getLiveTestingProgress()
-      if (progress2 && progress2.current > progress2.total) break
+      return
     }
 
-    setQuestions([])
+    const currentQ = qs[0]
     setProgress({
-      current: solved.length,
-      total: totalQuestions || solved.length,
-      status: "done"
+      current: liveProgress?.current || 0,
+      total: totalQuestions,
+      status: "solving",
+      currentQuestion: currentQ.text.substring(0, 50)
     })
 
-    const historyEntry: HistoryEntry = {
-      id: Math.random().toString(36).substring(2, 10),
-      testTitle: getPageTitle(),
-      testUrl: window.location.href,
-      questions: solved,
-      timestamp: Date.now(),
-      totalQuestions: totalQuestions || solved.length,
-      solvedQuestions: solved.length
+    const result = await solveOneQuestion(currentQ)
+    if (result) {
+      setSolvedQuestions((prev) => [...prev, result])
     }
-    addHistoryEntry(historyEntry)
-  }, [settings, solveOneQuestion])
+
+    setProgress({
+      current: liveProgress?.current || 1,
+      total: totalQuestions,
+      status: "done"
+    })
+  }, [settings, solveOneQuestion, locale.noQuestions])
+
+  const liveQuestionTextRef = useRef<string>("")
+
+  useEffect(() => {
+    if (!isLiveTestingPage()) return
+
+    const observer = new MutationObserver(() => {
+      const qs = parseQuestions()
+      if (qs.length === 0) return
+      const currentText = qs[0].text
+      if (currentText && currentText !== liveQuestionTextRef.current) {
+        liveQuestionTextRef.current = currentText
+        clearHighlights()
+        if (!solvingRef.current) {
+          solvingRef.current = true
+          solveLiveTest().finally(() => {
+            solvingRef.current = false
+          })
+        }
+      }
+    })
+
+    const target = document.querySelector(".test-container-inner") || document.body
+    observer.observe(target, { childList: true, subtree: true, characterData: true })
+
+    return () => observer.disconnect()
+  }, [solveLiveTest])
 
   const solveAll = useCallback(async () => {
     if (solvingRef.current) return
