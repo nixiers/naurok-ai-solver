@@ -33,6 +33,7 @@
     "host_permissions": [
       "https://naurok.com.ua/*",
       "https://naurok.ua/*",
+      "https://api.groq.com/*",
       "https://api.x.ai/*",
       "https://generativelanguage.googleapis.com/*",
       "https://api.openai.com/*",

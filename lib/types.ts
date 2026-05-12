@@ -26,6 +26,7 @@ export interface ParsedQuestion {
 
 export type AIModel =
   | "grok"
+  | "groq"
   | "gemini"
   | "gpt-4o"
   | "gpt-o3"
@@ -136,6 +137,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
 }
 
 export const AI_MODELS: AIModelConfig[] = [
+  {
+    id: "groq",
+    name: "Groq",
+    provider: "groq",
+    apiKeyName: "GROQ_API_KEY",
+    endpoint: "https://api.groq.com/openai/v1/chat/completions",
+    model: "llama-3.3-70b-versatile",
+    enabled: true
+  },
   {
     id: "grok",
     name: "Grok (xAI)",
