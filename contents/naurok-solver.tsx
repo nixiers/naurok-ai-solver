@@ -39,6 +39,7 @@ export const getStyle: PlasmoGetStyle = () => {
 
 function FloatingPanel() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS)
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [questions, setQuestions] = useState<ParsedQuestion[]>([])
   const [solvedQuestions, setSolvedQuestions] = useState<SolvedQuestion[]>([])
   const [progress, setProgress] = useState<SolveProgress>({
@@ -53,7 +54,10 @@ function FloatingPanel() {
   )
 
   useEffect(() => {
-    getSettings().then(setSettings)
+    getSettings().then((s) => {
+      setSettings(s)
+      setSettingsLoaded(true)
+    })
   }, [])
 
   const locale = t(settings.locale)
@@ -74,6 +78,16 @@ function FloatingPanel() {
   const solveOneQuestion = useCallback(
     async (question: ParsedQuestion): Promise<SolvedQuestion | null> => {
       try {
+        const freshSettings = await getSettings()
+        if (freshSettings.apiKeys.length > 0) {
+          setSettings(freshSettings)
+        }
+        const activeKeys =
+          freshSettings.apiKeys.length > 0
+            ? freshSettings.apiKeys
+            : settings.apiKeys
+        const activeMode = freshSettings.mode || settings.mode
+
         const result: ConsensusResult = await new Promise(
           (resolve, reject) => {
             chrome.runtime.sendMessage(
@@ -87,8 +101,8 @@ function FloatingPanel() {
                     element: null
                   }))
                 },
-                apiKeys: settings.apiKeys,
-                mode: settings.mode
+                apiKeys: activeKeys,
+                mode: activeMode
               },
               (response) => {
                 if (chrome.runtime.lastError) {
