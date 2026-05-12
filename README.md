@@ -26,27 +26,30 @@ AI-powered Chrome extension for automatically solving tests on [naurok.com.ua](h
 - `Alt+Q` — Solve current question
 - `Alt+N` — Toggle panel visibility
 
-## Setup
+## Установка (простой способ)
+
+1. **Скачай** ZIP из [GitHub Releases](https://github.com/nixiers/naurok-ai-solver/releases/latest)
+2. **Распакуй** ZIP в любую папку
+3. Открой `chrome://extensions` → включи **Developer mode** → нажми **Load unpacked** → выбери распакованную папку
+4. Кликни иконку расширения → **Settings** → выбери **Groq** → вставь API ключ → **+**
+5. Бесплатный Groq ключ: https://console.groq.com/keys
+
+## Установка (для разработчиков)
 
 ```bash
+git clone https://github.com/nixiers/naurok-ai-solver.git
+cd naurok-ai-solver
 pnpm install
-pnpm dev      # Development mode with HMR
-pnpm build    # Production build
-pnpm package  # Create .crx package
+pnpm build
 ```
 
-### Load in Chrome
+Загрузи `build/chrome-mv3-prod/` в Chrome → `chrome://extensions` → **Load unpacked**
 
-1. Navigate to `chrome://extensions/`
-2. Enable "Developer mode"
-3. Click "Load unpacked"
-4. Select the `build/chrome-mv3-dev/` (dev) or `build/chrome-mv3-prod/` (prod) directory
+### Настройка API ключей
 
-### Configure API Keys
-
-1. Click the extension icon in the toolbar
-2. Go to **Settings** tab
-3. Add your API keys for the AI models you want to use
+1. Кликни иконку расширения в тулбаре
+2. Перейди на вкладку **Settings**
+3. Добавь API ключи для нужных моделей (Groq рекомендуется)
 
 ## Tech Stack
 
