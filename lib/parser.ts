@@ -97,7 +97,65 @@ function parsePreviewPage(): ParsedQuestion[] {
   return questions
 }
 
+function parseLiveTestingPage(): ParsedQuestion[] {
+  const questions: ParsedQuestion[] = []
+
+  const questionContentEl = document.querySelector(
+    ".test-question-content, .test-content-text-inner"
+  )
+  if (!questionContentEl) return questions
+
+  const questionText = getTextContent(
+    document.querySelector(".test-content-text-inner") || questionContentEl
+  )
+  if (!questionText) return questions
+
+  const optionEls = document.querySelectorAll(
+    ".question-option-inner, .question-option-inner-multiple"
+  )
+  if (optionEls.length === 0) return questions
+
+  const options: QuestionOption[] = []
+  optionEls.forEach((optEl, optIndex) => {
+    const contentEl = optEl.querySelector(".question-option-inner-content")
+    const text = getTextContent(contentEl || optEl)
+    if (text && text.length > 0) {
+      options.push({
+        index: optIndex,
+        text,
+        element: optEl,
+        imageUrl: optEl.querySelector(".question-option-image img")?.src
+      })
+    }
+  })
+
+  const isMulti =
+    document.querySelector(".question-option-inner-multiple") !== null
+  const questionType = isMulti
+    ? "multiple_select"
+    : detectQuestionType(questionContentEl, options)
+
+  const questionImgEl = document.querySelector(
+    ".test-content-image img"
+  ) as HTMLImageElement | null
+
+  questions.push({
+    id: generateId(),
+    index: 0,
+    type: questionType,
+    text: questionText,
+    options,
+    imageUrl: questionImgEl?.src,
+    element: document.querySelector(".test-container-inner") || questionContentEl
+  })
+
+  return questions
+}
+
 function parseTestingPage(): ParsedQuestion[] {
+  const liveQuestions = parseLiveTestingPage()
+  if (liveQuestions.length > 0) return liveQuestions
+
   const questions: ParsedQuestion[] = []
 
   const selectors = [
@@ -250,6 +308,27 @@ export function parseQuestions(): ParsedQuestion[] {
   if (testingQuestions.length > 0) return testingQuestions
 
   return parseFallback()
+}
+
+export function isLiveTestingPage(): boolean {
+  const url = window.location.href
+  return (
+    url.includes("/test/testing/") ||
+    url.includes("/test/start/") ||
+    document.querySelector(".test-container-inner") !== null
+  )
+}
+
+export function getLiveTestingProgress(): {
+  current: number
+  total: number
+} | null {
+  const counterEl = document.querySelector(".numberQuestionsLeft")
+  if (!counterEl) return null
+  const text = counterEl.textContent?.trim() || ""
+  const match = text.match(/(\d+)\s*\/\s*(\d+)/)
+  if (!match) return null
+  return { current: parseInt(match[1], 10), total: parseInt(match[2], 10) }
 }
 
 export function getPageTitle(): string {

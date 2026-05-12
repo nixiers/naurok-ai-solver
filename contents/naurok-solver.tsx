@@ -4,7 +4,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react"
 
 import { humanLikeBehavior } from "~lib/anti-detect"
 import { applyResult, clearHighlights } from "~lib/highlighter"
-import { getPageTitle, parseQuestions } from "~lib/parser"
+import {
+  getPageTitle,
+  isLiveTestingPage,
+  getLiveTestingProgress,
+  parseQuestions
+} from "~lib/parser"
 import { addHistoryEntry, getSettings } from "~lib/storage"
 import type {
   AppSettings,
@@ -124,9 +129,89 @@ function FloatingPanel() {
 
   const solvingRef = useRef(false)
 
+  const solveLiveTest = useCallback(async () => {
+    const liveProgress = getLiveTestingProgress()
+    const totalQuestions = liveProgress?.total || 0
+    setProgress({ current: 0, total: totalQuestions, status: "solving" })
+    clearHighlights()
+    setSolvedQuestions([])
+
+    const solved: SolvedQuestion[] = []
+    const maxIterations = totalQuestions > 0 ? totalQuestions : 100
+
+    for (let i = 0; i < maxIterations; i++) {
+      await new Promise((r) => setTimeout(r, 800))
+
+      const qs = parseQuestions()
+      if (qs.length === 0) {
+        const sceneEnd = document.querySelector('.test-container-inner[ng-show="test.scene == 3"]')
+        if (sceneEnd && window.getComputedStyle(sceneEnd).display !== "none") break
+
+        const endHeading = document.querySelector(".message_scene.ended")
+        if (endHeading) break
+
+        await new Promise((r) => setTimeout(r, 500))
+        continue
+      }
+
+      const currentQ = qs[0]
+      setProgress({
+        current: i,
+        total: totalQuestions || i + 1,
+        status: "solving",
+        currentQuestion: currentQ.text.substring(0, 50)
+      })
+
+      if (settings.antiDetection && i > 0) {
+        await humanLikeBehavior(settings.minDelay, settings.maxDelay)
+      }
+
+      const result = await solveOneQuestion(currentQ)
+      if (result) {
+        solved.push(result)
+        setSolvedQuestions([...solved])
+      }
+
+      setProgress({
+        current: i + 1,
+        total: totalQuestions || i + 1,
+        status: "solving"
+      })
+
+      await new Promise((r) => setTimeout(r, 1500))
+
+      const progress2 = getLiveTestingProgress()
+      if (progress2 && progress2.current > progress2.total) break
+    }
+
+    setQuestions([])
+    setProgress({
+      current: solved.length,
+      total: totalQuestions || solved.length,
+      status: "done"
+    })
+
+    const historyEntry: HistoryEntry = {
+      id: Math.random().toString(36).substring(2, 10),
+      testTitle: getPageTitle(),
+      testUrl: window.location.href,
+      questions: solved,
+      timestamp: Date.now(),
+      totalQuestions: totalQuestions || solved.length,
+      solvedQuestions: solved.length
+    }
+    addHistoryEntry(historyEntry)
+  }, [settings, solveOneQuestion])
+
   const solveAll = useCallback(async () => {
     if (solvingRef.current) return
     solvingRef.current = true
+
+    if (isLiveTestingPage()) {
+      await solveLiveTest()
+      solvingRef.current = false
+      return
+    }
 
     let qs = questions
     if (qs.length === 0) {
@@ -179,7 +264,7 @@ function FloatingPanel() {
     }
     addHistoryEntry(historyEntry)
     solvingRef.current = false
-  }, [questions, scanQuestions, settings, solveOneQuestion])
+  }, [questions, scanQuestions, settings, solveOneQuestion, solveLiveTest])
 
   useEffect(() => {
     const handleMessage = (message: { type: string }) => {
@@ -287,7 +372,7 @@ function FloatingPanel() {
       {solvedQuestions.length > 0 && (
         <div className="naurok-ai-results">
           <div className="naurok-ai-results-header">
-            <span>{locale.solved}: {solvedQuestions.length}/{questions.length}</span>
+            <span>{locale.solved}: {solvedQuestions.length}/{progress.total || questions.length || solvedQuestions.length}</span>
             <button className="naurok-ai-text-btn" onClick={() => { clearHighlights(); setSolvedQuestions([]) }}>
               {locale.reset}
             </button>
@@ -297,7 +382,7 @@ function FloatingPanel() {
               <div key={idx} className="naurok-ai-result-item" onClick={() => setActiveResultIndex(activeResultIndex === idx ? null : idx)}>
                 <div className="naurok-ai-result-header">
                   <span className="naurok-ai-result-q">
-                    Q{sq.question.index + 1}: {sq.question.text.substring(0, 40)}{sq.question.text.length > 40 ? "..." : ""}
+                    Q{idx + 1}: {sq.question.text.substring(0, 40)}{sq.question.text.length > 40 ? "..." : ""}
                   </span>
                   <ConfidenceBadge confidence={sq.result.confidence} size="sm" />
                 </div>
