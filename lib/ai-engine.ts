@@ -257,12 +257,15 @@ function buildConsensus(responses: AIResponse[]): ConsensusResult {
   }
 
   const voteMap = new Map<
-    number,
-    { answer: string; models: AIModel[]; confidences: number[] }
+    string,
+    { answer: string; answerIndex: number; models: AIModel[]; confidences: number[] }
   >()
 
   for (const r of responses) {
-    const key = r.answerIndex >= 0 ? r.answerIndex : -999
+    const key =
+      r.answerIndex >= 0
+        ? `idx:${r.answerIndex}`
+        : `text:${r.answer.toLowerCase().trim()}`
     const existing = voteMap.get(key)
     if (existing) {
       existing.models.push(r.model)
@@ -270,16 +273,17 @@ function buildConsensus(responses: AIResponse[]): ConsensusResult {
     } else {
       voteMap.set(key, {
         answer: r.answer,
+        answerIndex: r.answerIndex,
         models: [r.model],
         confidences: [r.confidence]
       })
     }
   }
 
-  const votingDetails: VotingDetail[] = Array.from(voteMap.entries())
-    .map(([answerIndex, data]) => ({
+  const votingDetails: VotingDetail[] = Array.from(voteMap.values())
+    .map((data) => ({
       answer: data.answer,
-      answerIndex,
+      answerIndex: data.answerIndex,
       votes: data.models.length,
       avgConfidence:
         data.confidences.reduce((a, b) => a + b, 0) / data.confidences.length,
