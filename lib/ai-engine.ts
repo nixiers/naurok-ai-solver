@@ -52,11 +52,14 @@ function parseAIResponseText(
   text: string,
   question: ParsedQuestion
 ): { answerIndex: number; answerText: string; confidence: number } {
-  const startIdx = text.indexOf("{")
-  const endIdx = text.lastIndexOf("}")
+  // Strip <think>...</think> tags from reasoning models (Qwen3, DeepSeek-R1)
+  const cleanText = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+  const textToSearch = cleanText.length > 0 ? cleanText : text
+  const startIdx = textToSearch.indexOf("{")
+  const endIdx = textToSearch.lastIndexOf("}")
   if (startIdx !== -1 && endIdx > startIdx) {
     try {
-      const parsed = JSON.parse(text.substring(startIdx, endIdx + 1))
+      const parsed = JSON.parse(textToSearch.substring(startIdx, endIdx + 1))
       const answerIndex = parsed.answer_index ?? -1
       const answerText = parsed.answer_text ?? ""
       const confidence = Math.min(1, Math.max(0, parsed.confidence ?? 0.5))
@@ -84,7 +87,7 @@ function parseAIResponseText(
     }
   }
 
-  const numberMatch = text.match(/^(\d+)/)
+  const numberMatch = textToSearch.match(/^(\d+)/)
   if (numberMatch) {
     const idx = parseInt(numberMatch[1], 10)
     if (idx >= 0 && idx < question.options.length) {
@@ -97,9 +100,9 @@ function parseAIResponseText(
   }
 
   if (question.options.length > 0) {
-    const cleanText = text.toLowerCase().trim()
+    const lowerText = textToSearch.toLowerCase().trim()
     for (let i = 0; i < question.options.length; i++) {
-      if (cleanText.includes(question.options[i].text.toLowerCase())) {
+      if (lowerText.includes(question.options[i].text.toLowerCase())) {
         return {
           answerIndex: i,
           answerText: question.options[i].text,
@@ -355,6 +358,62 @@ function getModelsForMode(
   }
 }
 
+const GROQ_CONSENSUS_MODELS = [
+  "qwen/qwen3-32b",
+  "meta-llama/llama-4-scout-17b-16e-instruct",
+  "llama-3.3-70b-versatile"
+]
+
+async function queryGroqWithModel(
+  modelName: string,
+  question: ParsedQuestion,
+  apiKey: string
+): Promise<AIResponse> {
+  const prompt = buildPrompt(question)
+  const startTime = Date.now()
+
+  const response = await fetch(
+    "https://api.groq.com/openai/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: modelName,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Ти — експерт з українських шкільних предметів. Відповідай ТІЛЬКИ у форматі JSON. Думай крок за кроком перед відповіддю. Будь максимально точним."
+          },
+          { role: "user", content: prompt }
+        ],
+        temperature: 0,
+        max_tokens: 2048
+      })
+    }
+  )
+
+  if (!response.ok) {
+    throw new Error(`Groq ${modelName} error: ${response.status}`)
+  }
+
+  const data = await response.json()
+  const responseText = data.choices?.[0]?.message?.content || ""
+  const parsed = parseAIResponseText(responseText, question)
+
+  return {
+    model: "groq" as AIModel,
+    answer: parsed.answerText,
+    answerIndex: parsed.answerIndex,
+    confidence: parsed.confidence,
+    reasoning: `[${modelName}] ${responseText}`,
+    responseTime: Date.now() - startTime
+  }
+}
+
 export async function solveQuestion(
   question: ParsedQuestion,
   apiKeys: ApiKeyConfig[],
@@ -366,9 +425,35 @@ export async function solveQuestion(
     throw new Error("No AI models configured. Add API keys in settings.")
   }
 
-  const results = await Promise.allSettled(
-    models.map((modelId) => queryModel(modelId, question, apiKeys))
+  const groqKey = apiKeys.find(
+    (k) => k.model === "groq" && k.enabled && k.key.length > 0
   )
+  const useGroqConsensus =
+    groqKey && (mode === "accuracy" || models.length === 1)
+
+  const queryPromises: Promise<AIResponse>[] = []
+
+  if (useGroqConsensus) {
+    const groqModels =
+      mode === "accuracy"
+        ? GROQ_CONSENSUS_MODELS
+        : GROQ_CONSENSUS_MODELS.slice(0, 1)
+    for (const modelName of groqModels) {
+      queryPromises.push(
+        queryGroqWithModel(modelName, question, groqKey.key)
+      )
+    }
+    const otherModels = models.filter((m) => m !== "groq")
+    for (const modelId of otherModels) {
+      queryPromises.push(queryModel(modelId, question, apiKeys))
+    }
+  } else {
+    for (const modelId of models) {
+      queryPromises.push(queryModel(modelId, question, apiKeys))
+    }
+  }
+
+  const results = await Promise.allSettled(queryPromises)
 
   const successfulResponses: AIResponse[] = []
   for (const result of results) {

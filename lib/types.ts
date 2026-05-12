@@ -143,7 +143,7 @@ export const AI_MODELS: AIModelConfig[] = [
     provider: "groq",
     apiKeyName: "GROQ_API_KEY",
     endpoint: "https://api.groq.com/openai/v1/chat/completions",
-    model: "llama-3.3-70b-versatile",
+    model: "qwen/qwen3-32b",
     enabled: true
   },
   {
