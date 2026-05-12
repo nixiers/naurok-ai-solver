@@ -11,32 +11,38 @@ import type {
 import { AI_MODELS } from "./types"
 
 function buildPrompt(question: ParsedQuestion): string {
-  let prompt = `You are an expert at answering Ukrainian school/university test questions. Answer PRECISELY and CORRECTLY.
+  let prompt = `Ти — експерт з українських шкільних та університетських тестів. Відповідай ТОЧНО та ПРАВИЛЬНО.
 
-Question: ${question.text}
+Питання: ${question.text}
 `
 
   if (question.options.length > 0) {
-    prompt += "\nAnswer options:\n"
+    prompt += "\nВаріанти відповідей:\n"
     question.options.forEach((opt, i) => {
       prompt += `${i}: ${opt.text}\n`
     })
-    prompt += `\nRespond with ONLY a JSON object in this exact format:
-{"answer_index": <number>, "answer_text": "<exact text of correct option>", "confidence": <0.0-1.0>}
+    prompt += `\nІНСТРУКЦІЯ:
+1. Уважно прочитай питання та всі варіанти відповідей
+2. Проаналізуй кожен варіант — який з них є правильним і чому
+3. Подумай крок за кроком (think step by step)
+4. Відповідай JSON:
 
-Rules:
-- answer_index must be the 0-based index of the correct option
-- answer_text must be the exact text from the options
-- confidence is your certainty from 0.0 to 1.0
-- Do NOT add any explanation, only the JSON`
+{"reasoning": "<коротке пояснення чому саме цей варіант правильний>", "answer_index": <номер правильного варіанту (починаючи з 0)>, "answer_text": "<точний текст правильного варіанту>", "confidence": <0.0-1.0>}
+
+Правила:
+- answer_index — індекс правильного варіанту (0-based, тобто перший варіант = 0)
+- answer_text — ТОЧНИЙ текст варіанту, скопійований з опцій вище
+- confidence — твоя впевненість від 0.0 до 1.0
+- reasoning — КОРОТКЕ пояснення (1-2 речення) чому цей варіант правильний
+- Відповідай ТІЛЬКИ JSON, без додаткового тексту`
   } else {
-    prompt += `\nThis is an open-ended question. Respond with ONLY a JSON object:
-{"answer_text": "<your answer>", "confidence": <0.0-1.0>}
+    prompt += `\nЦе відкрите питання. Відповідай JSON:
+{"reasoning": "<коротке пояснення>", "answer_text": "<твоя відповідь>", "confidence": <0.0-1.0>}
 
-Rules:
-- answer_text should be a short, precise answer
-- confidence is your certainty from 0.0 to 1.0
-- Do NOT add any explanation, only the JSON`
+Правила:
+- answer_text — коротка, точна відповідь
+- confidence — твоя впевненість від 0.0 до 1.0
+- Відповідай ТІЛЬКИ JSON, без додаткового тексту`
   }
 
   return prompt
@@ -46,15 +52,33 @@ function parseAIResponseText(
   text: string,
   question: ParsedQuestion
 ): { answerIndex: number; answerText: string; confidence: number } {
-  const jsonMatch = text.match(/\{[\s\S]*?\}/)
-  if (jsonMatch) {
+  const startIdx = text.indexOf("{")
+  const endIdx = text.lastIndexOf("}")
+  if (startIdx !== -1 && endIdx > startIdx) {
     try {
-      const parsed = JSON.parse(jsonMatch[0])
-      return {
-        answerIndex: parsed.answer_index ?? -1,
-        answerText: parsed.answer_text ?? "",
-        confidence: Math.min(1, Math.max(0, parsed.confidence ?? 0.5))
+      const parsed = JSON.parse(text.substring(startIdx, endIdx + 1))
+      const answerIndex = parsed.answer_index ?? -1
+      const answerText = parsed.answer_text ?? ""
+      const confidence = Math.min(1, Math.max(0, parsed.confidence ?? 0.5))
+
+      if (
+        answerIndex >= 0 &&
+        answerIndex < question.options.length &&
+        answerText !== question.options[answerIndex]?.text
+      ) {
+        const matchByText = question.options.findIndex(
+          (o) => o.text.toLowerCase().trim() === answerText.toLowerCase().trim()
+        )
+        if (matchByText !== -1) {
+          return {
+            answerIndex: matchByText,
+            answerText: question.options[matchByText].text,
+            confidence
+          }
+        }
       }
+
+      return { answerIndex, answerText, confidence }
     } catch {
       // Fall through to text parsing
     }
@@ -105,12 +129,12 @@ async function callOpenAICompatible(
         {
           role: "system",
           content:
-            "You are an expert test solver. Respond only with the requested JSON format. Be precise and accurate."
+            "Ти — експерт з українських шкільних предметів. Відповідай ТІЛЬКИ у форматі JSON. Думай крок за кроком перед відповіддю. Будь максимально точним."
         },
         { role: "user", content: prompt }
       ],
-      temperature: 0.1,
-      max_tokens: 200
+      temperature: 0,
+      max_tokens: 500
     })
   })
 
@@ -137,8 +161,8 @@ async function callGemini(
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 200
+        temperature: 0,
+        maxOutputTokens: 500
       }
     })
   })
@@ -170,8 +194,8 @@ async function callAnthropic(
       max_tokens: 200,
       messages: [{ role: "user", content: prompt }],
       system:
-        "You are an expert test solver. Respond only with the requested JSON format. Be precise and accurate.",
-      temperature: 0.1
+        "Ти — експерт з українських шкільних предметів. Відповідай ТІЛЬКИ у форматі JSON. Думай крок за кроком перед відповіддю. Будь максимально точним.",
+      temperature: 0
     })
   })
 
