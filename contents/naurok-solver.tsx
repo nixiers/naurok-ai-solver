@@ -7,6 +7,7 @@ import { applyResult, clearHighlights } from "~lib/highlighter"
 import {
   getPageTitle,
   isLiveTestingPage,
+  isVseosvitaLivePage,
   getLiveTestingProgress,
   parseQuestions
 } from "~lib/parser"
@@ -27,7 +28,7 @@ import { ModelVotes } from "~components/ModelVotes"
 import { ProgressBar } from "~components/ProgressBar"
 
 export const config: PlasmoCSConfig = {
-  matches: ["https://naurok.com.ua/*", "https://naurok.ua/*"],
+  matches: ["https://naurok.com.ua/*", "https://naurok.ua/*", "https://vseosvita.ua/*"],
   all_frames: true
 }
 
@@ -215,7 +216,7 @@ function FloatingPanel() {
       }
     })
 
-    const target = document.querySelector(".test-container-inner") || document.body
+    const target = document.querySelector(".test-container-inner") || document.querySelector(".v-test-go-body") || document.querySelector(".v-test-question") || document.body
     observer.observe(target, { childList: true, subtree: true, characterData: true })
 
     return () => observer.disconnect()

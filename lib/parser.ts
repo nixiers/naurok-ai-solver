@@ -48,6 +48,153 @@ function detectQuestionType(
   return "unknown"
 }
 
+function parseVseosvitaPreviewPage(): ParsedQuestion[] {
+  const questions: ParsedQuestion[] = []
+  const questionElements = document.querySelectorAll(
+    ".vr-quest, .v-test-question"
+  )
+  if (questionElements.length === 0) return questions
+
+  questionElements.forEach((el, index) => {
+    const titleEl = el.querySelector(
+      ".v-test-questions-title .content-box, .v-test-questions-title p, .v-test-questions-title"
+    )
+    const questionText = getTextContent(titleEl || el)
+    if (!questionText) return
+
+    const options: QuestionOption[] = []
+    const optionSelectors = [
+      ".answer-text",
+      ".v-test-questions-select-block .t-text-guest",
+      ".v-test-questions-select-block .t-text",
+      ".t-test-questions .t-text-guest",
+      ".t-test-questions .t-text",
+      ".test-answer",
+      "label[for]"
+    ]
+
+    const seen = new Set<string>()
+    for (const selector of optionSelectors) {
+      el.querySelectorAll(selector).forEach((optEl) => {
+        const text = getTextContent(optEl)
+        if (!text || seen.has(text)) return
+        seen.add(text)
+        options.push({
+          index: options.length,
+          text,
+          element: optEl,
+          imageUrl: optEl.querySelector("img")?.getAttribute("src") || undefined
+        })
+      })
+      if (options.length > 0) break
+    }
+
+    if (options.length === 0) {
+      el.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((input) => {
+        const label = input.closest("label") || input.parentElement
+        const text = getTextContent(label)
+        if (text && !seen.has(text)) {
+          seen.add(text)
+          options.push({
+            index: options.length,
+            text,
+            element: label,
+          })
+        }
+      })
+    }
+
+    const questionType = detectQuestionType(el, options)
+    const imgEl = el.querySelector("img")
+
+    questions.push({
+      id: generateId(),
+      index,
+      type: questionType,
+      text: questionText,
+      options,
+      imageUrl: imgEl?.getAttribute("src") || undefined,
+      element: el
+    })
+  })
+
+  return questions
+}
+
+function parseVseosvitaLivePage(): ParsedQuestion[] {
+  const questions: ParsedQuestion[] = []
+
+  const questionRoot = document.querySelector(
+    "#i-test-question-uwj219, .v-test-question, .v-test-go-bg, .v-test-go-body"
+  )
+  if (!questionRoot) return questions
+
+  const titleNode = questionRoot.querySelector(
+    ".v-test-questions-title .content-box, .v-test-questions-title p, .v-test-questions-title"
+  )
+  const questionText = getTextContent(titleNode || questionRoot)
+  if (!questionText) return questions
+
+  const options: QuestionOption[] = []
+  const optionSelectors = [
+    ".answer-text",
+    ".v-test-questions-select-block .t-text-guest",
+    ".v-test-questions-select-block .t-text",
+    ".t-test-questions .t-text-guest",
+    ".t-test-questions .t-text",
+    ".test-answer",
+    "label[for]"
+  ]
+
+  const seen = new Set<string>()
+  for (const selector of optionSelectors) {
+    questionRoot.querySelectorAll(selector).forEach((optEl) => {
+      const text = getTextContent(optEl)
+      if (!text || seen.has(text)) return
+      seen.add(text)
+      options.push({
+        index: options.length,
+        text,
+        element: optEl,
+        imageUrl: optEl.querySelector("img")?.getAttribute("src") || undefined
+      })
+    })
+    if (options.length > 0) break
+  }
+
+  if (options.length === 0) {
+    questionRoot.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((input) => {
+      const label = input.closest("label") || input.parentElement
+      const text = getTextContent(label)
+      if (text && !seen.has(text)) {
+        seen.add(text)
+        options.push({
+          index: options.length,
+          text,
+          element: label,
+        })
+      }
+    })
+  }
+
+  const hasCheckbox = questionRoot.querySelector('input[type="checkbox"]') !== null
+  const questionType = hasCheckbox ? "multiple_select" : detectQuestionType(questionRoot, options)
+
+  const imgEl = questionRoot.querySelector("img")
+
+  questions.push({
+    id: generateId(),
+    index: 0,
+    type: questionType,
+    text: questionText,
+    options,
+    imageUrl: imgEl?.getAttribute("src") || undefined,
+    element: questionRoot
+  })
+
+  return questions
+}
+
 function parsePreviewPage(): ParsedQuestion[] {
   const questions: ParsedQuestion[] = []
   const questionElements = document.querySelectorAll(
@@ -124,7 +271,7 @@ function parseLiveTestingPage(): ParsedQuestion[] {
         index: optIndex,
         text,
         element: optEl,
-        imageUrl: optEl.querySelector(".question-option-image img")?.src
+        imageUrl: (optEl.querySelector(".question-option-image img") as HTMLImageElement | null)?.src
       })
     }
   })
@@ -293,8 +440,31 @@ function parseFallback(): ParsedQuestion[] {
   return questions
 }
 
+export function isVseosvitaPage(): boolean {
+  return window.location.hostname === "vseosvita.ua"
+}
+
+export function isVseosvitaLivePage(): boolean {
+  const url = window.location.href
+  return (
+    isVseosvitaPage() &&
+    (url.includes("/test/go-olp") ||
+      url.includes("/test/start/") ||
+      document.querySelector(".v-test-go-body, .v-test-question, #i-test-question-uwj219") !== null)
+  )
+}
+
 export function parseQuestions(): ParsedQuestion[] {
   const url = window.location.href
+
+  if (isVseosvitaPage()) {
+    if (isVseosvitaLivePage()) {
+      const vseosvitaLive = parseVseosvitaLivePage()
+      if (vseosvitaLive.length > 0) return vseosvitaLive
+    }
+    const vseosvitaPreview = parseVseosvitaPreviewPage()
+    if (vseosvitaPreview.length > 0) return vseosvitaPreview
+  }
 
   if (url.includes("/test/testing/") || url.includes("/test/start/")) {
     const testingQuestions = parseTestingPage()
@@ -311,6 +481,7 @@ export function parseQuestions(): ParsedQuestion[] {
 }
 
 export function isLiveTestingPage(): boolean {
+  if (isVseosvitaLivePage()) return true
   const url = window.location.href
   return (
     url.includes("/test/testing/") ||

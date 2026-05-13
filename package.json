@@ -2,7 +2,7 @@
   "name": "naurok-ai-solver",
   "displayName": "Naurok AI Solver",
   "version": "0.0.1",
-  "description": "AI-powered test solver for naurok.com.ua with multi-model consensus",
+  "description": "AI-powered test solver for naurok.com.ua and vseosvita.ua with multi-model consensus",
   "author": "nixiers",
   "scripts": {
     "dev": "plasmo dev",
@@ -33,6 +33,7 @@
     "host_permissions": [
       "https://naurok.com.ua/*",
       "https://naurok.ua/*",
+      "https://vseosvita.ua/*",
       "https://api.groq.com/*",
       "https://api.x.ai/*",
       "https://generativelanguage.googleapis.com/*",
