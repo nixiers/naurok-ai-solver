@@ -7,7 +7,6 @@ import { applyResult, clearHighlights } from "~lib/highlighter"
 import {
   getPageTitle,
   isLiveTestingPage,
-  isVseosvitaLivePage,
   getLiveTestingProgress,
   parseQuestions
 } from "~lib/parser"

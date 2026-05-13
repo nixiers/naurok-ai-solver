@@ -124,15 +124,67 @@ function parseVseosvitaPreviewPage(): ParsedQuestion[] {
 function parseVseosvitaLivePage(): ParsedQuestion[] {
   const questions: ParsedQuestion[] = []
 
-  const questionRoot = document.querySelector(
-    "#i-test-question-uwj219, .v-test-question, .v-test-go-bg, .v-test-go-body"
-  )
-  if (!questionRoot) return questions
+  const questionRootSelectors = [
+    "#i-test-question-uwj219",
+    ".v-test-question",
+    ".v-test-go-bg",
+    ".v-test-go-body",
+    ".vr-quest",
+    ".vseosvita-test-content",
+    ".test-question-text"
+  ]
 
-  const titleNode = questionRoot.querySelector(
-    ".v-test-questions-title .content-box, .v-test-questions-title p, .v-test-questions-title"
-  )
-  const questionText = getTextContent(titleNode || questionRoot)
+  let questionRoot: Element | null = null
+  for (const sel of questionRootSelectors) {
+    questionRoot = document.querySelector(sel)
+    if (questionRoot) break
+  }
+
+  const searchRoot = questionRoot || document.body
+
+  const titleSelectors = [
+    ".v-test-questions-title .content-box",
+    ".v-test-questions-title p",
+    ".v-test-questions-title",
+    ".question-text",
+    ".test-question-text"
+  ]
+
+  let titleNode: Element | null = null
+  for (const sel of titleSelectors) {
+    titleNode = searchRoot.querySelector(sel)
+    if (titleNode) break
+  }
+
+  let questionText = getTextContent(titleNode)
+
+  if (!questionText && questionRoot) {
+    const allText = getTextContent(questionRoot)
+    if (allText && allText.length < 1000) {
+      questionText = allText
+    }
+  }
+
+  if (!questionText) {
+    const radios = document.querySelectorAll('input[type="radio"], input[type="checkbox"]')
+    if (radios.length > 0) {
+      const firstRadio = radios[0]
+      const container = firstRadio.closest("form, [class*='quest'], [class*='test'], div") || document.body
+      const potentialTitle = container.querySelector("p, h2, h3, span:first-child, div > span")
+      questionText = getTextContent(potentialTitle)
+      if (!questionText) {
+        const textNodes: string[] = []
+        container.childNodes.forEach((node) => {
+          if (node.nodeType === Node.TEXT_NODE) {
+            const t = (node.textContent || "").trim()
+            if (t) textNodes.push(t)
+          }
+        })
+        questionText = textNodes.join(" ")
+      }
+    }
+  }
+
   if (!questionText) return questions
 
   const options: QuestionOption[] = []
@@ -148,7 +200,7 @@ function parseVseosvitaLivePage(): ParsedQuestion[] {
 
   const seen = new Set<string>()
   for (const selector of optionSelectors) {
-    questionRoot.querySelectorAll(selector).forEach((optEl) => {
+    searchRoot.querySelectorAll(selector).forEach((optEl) => {
       const text = getTextContent(optEl)
       if (!text || seen.has(text)) return
       seen.add(text)
@@ -163,7 +215,7 @@ function parseVseosvitaLivePage(): ParsedQuestion[] {
   }
 
   if (options.length === 0) {
-    questionRoot.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((input) => {
+    searchRoot.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((input) => {
       const label = input.closest("label") || input.parentElement
       const text = getTextContent(label)
       if (text && !seen.has(text)) {
@@ -177,10 +229,27 @@ function parseVseosvitaLivePage(): ParsedQuestion[] {
     })
   }
 
-  const hasCheckbox = questionRoot.querySelector('input[type="checkbox"]') !== null
-  const questionType = hasCheckbox ? "multiple_select" : detectQuestionType(questionRoot, options)
+  if (options.length === 0) {
+    document.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((input) => {
+      const label = input.closest("label") || input.parentElement
+      const text = getTextContent(label)
+      if (text && !seen.has(text)) {
+        seen.add(text)
+        options.push({
+          index: options.length,
+          text,
+          element: label,
+        })
+      }
+    })
+  }
 
-  const imgEl = questionRoot.querySelector("img")
+  if (options.length === 0) return questions
+
+  const hasCheckbox = (searchRoot.querySelector('input[type="checkbox"]') || document.querySelector('input[type="checkbox"]')) !== null
+  const questionType = hasCheckbox ? "multiple_select" : detectQuestionType(searchRoot, options)
+
+  const imgEl = searchRoot.querySelector("img")
 
   questions.push({
     id: generateId(),
@@ -189,7 +258,7 @@ function parseVseosvitaLivePage(): ParsedQuestion[] {
     text: questionText,
     options,
     imageUrl: imgEl?.getAttribute("src") || undefined,
-    element: questionRoot
+    element: questionRoot || searchRoot
   })
 
   return questions
@@ -445,13 +514,12 @@ export function isVseosvitaPage(): boolean {
 }
 
 export function isVseosvitaLivePage(): boolean {
+  if (!isVseosvitaPage()) return false
   const url = window.location.href
-  return (
-    isVseosvitaPage() &&
-    (url.includes("/test/go-olp") ||
-      url.includes("/test/start/") ||
-      document.querySelector(".v-test-go-body, .v-test-question, #i-test-question-uwj219") !== null)
-  )
+  if (url.includes("/test/go-olp") || url.includes("/test/start/")) return true
+  if (document.querySelector(".v-test-go-body, .v-test-question, #i-test-question-uwj219, .vr-quest")) return true
+  const hasRadios = document.querySelectorAll('input[type="radio"]').length >= 2
+  return hasRadios
 }
 
 export function parseQuestions(): ParsedQuestion[] {
@@ -495,11 +563,22 @@ export function getLiveTestingProgress(): {
   total: number
 } | null {
   const counterEl = document.querySelector(".numberQuestionsLeft")
-  if (!counterEl) return null
-  const text = counterEl.textContent?.trim() || ""
-  const match = text.match(/(\d+)\s*\/\s*(\d+)/)
-  if (!match) return null
-  return { current: parseInt(match[1], 10), total: parseInt(match[2], 10) }
+  if (counterEl) {
+    const text = counterEl.textContent?.trim() || ""
+    const match = text.match(/(\d+)\s*\/\s*(\d+)/)
+    if (match) return { current: parseInt(match[1], 10), total: parseInt(match[2], 10) }
+  }
+
+  const allElements = document.querySelectorAll("span, div, p")
+  for (const el of allElements) {
+    const text = el.textContent?.trim() || ""
+    if (text.length < 10) {
+      const match = text.match(/^(\d+)\s*[/\\/]\s*(\d+)$/)
+      if (match) return { current: parseInt(match[1], 10), total: parseInt(match[2], 10) }
+    }
+  }
+
+  return null
 }
 
 export function getPageTitle(): string {
