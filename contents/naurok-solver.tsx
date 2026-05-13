@@ -7,6 +7,7 @@ import { applyResult, clearHighlights } from "~lib/highlighter"
 import {
   getPageTitle,
   isLiveTestingPage,
+  isVseosvitaPage,
   getLiveTestingProgress,
   parseQuestions
 } from "~lib/parser"
@@ -196,30 +197,41 @@ function FloatingPanel() {
 
   const liveQuestionTextRef = useRef<string>("")
 
+  const checkForNewQuestion = useCallback(() => {
+    const qs = parseQuestions()
+    if (qs.length === 0) return
+    const currentText = qs[0].text
+    if (currentText && currentText !== liveQuestionTextRef.current) {
+      liveQuestionTextRef.current = currentText
+      clearHighlights()
+      if (!solvingRef.current) {
+        solvingRef.current = true
+        solveLiveTest().finally(() => {
+          solvingRef.current = false
+        })
+      }
+    }
+  }, [solveLiveTest])
+
   useEffect(() => {
     if (!isLiveTestingPage()) return
 
-    const observer = new MutationObserver(() => {
-      const qs = parseQuestions()
-      if (qs.length === 0) return
-      const currentText = qs[0].text
-      if (currentText && currentText !== liveQuestionTextRef.current) {
-        liveQuestionTextRef.current = currentText
-        clearHighlights()
-        if (!solvingRef.current) {
-          solvingRef.current = true
-          solveLiveTest().finally(() => {
-            solvingRef.current = false
-          })
-        }
-      }
-    })
+    const observer = new MutationObserver(() => checkForNewQuestion())
 
     const target = document.querySelector(".test-container-inner") || document.querySelector(".v-test-go-body") || document.querySelector(".v-test-question") || document.body
     observer.observe(target, { childList: true, subtree: true, characterData: true })
 
-    return () => observer.disconnect()
-  }, [solveLiveTest])
+    // Polling fallback for vseosvita (Vue reuses DOM elements, MutationObserver may miss changes)
+    let pollInterval: ReturnType<typeof setInterval> | null = null
+    if (isVseosvitaPage()) {
+      pollInterval = setInterval(() => checkForNewQuestion(), 1000)
+    }
+
+    return () => {
+      observer.disconnect()
+      if (pollInterval) clearInterval(pollInterval)
+    }
+  }, [checkForNewQuestion])
 
   const solveAll = useCallback(async () => {
     if (solvingRef.current) return
