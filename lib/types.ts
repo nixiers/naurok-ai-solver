@@ -47,6 +47,7 @@ export interface AIResponse {
   model: AIModel
   answer: string
   answerIndex: number
+  answerIndices?: number[]
   confidence: number
   reasoning?: string
   responseTime: number
@@ -55,6 +56,7 @@ export interface AIResponse {
 export interface ConsensusResult {
   bestAnswer: string
   bestAnswerIndex: number
+  bestAnswerIndices?: number[]
   confidence: number
   responses: AIResponse[]
   votingDetails: VotingDetail[]

@@ -21,7 +21,24 @@ function buildPrompt(question: ParsedQuestion): string {
     question.options.forEach((opt, i) => {
       prompt += `${i}: ${opt.text}\n`
     })
-    prompt += `\nІНСТРУКЦІЯ:
+
+    if (question.type === "multiple_select") {
+      prompt += `\nІНСТРУКЦІЯ:
+Це питання з КІЛЬКОМА правильними відповідями. Потрібно обрати ВСІ правильні варіанти.
+1. Уважно прочитай питання та всі варіанти відповідей
+2. Проаналізуй кожен варіант — чи є він правильним і чому
+3. Подумай крок за кроком (think step by step)
+4. Відповідай JSON:
+
+{"reasoning": "<коротке пояснення чому саме ці варіанти правильні>", "answer_indices": [<масив індексів правильних варіантів>], "answer_texts": [<масив точних текстів правильних варіантів>], "confidence": <0.0-1.0>}
+
+Правила:
+- answer_indices — масив індексів ВСІХ правильних варіантів (0-based)
+- answer_texts — масив ТОЧНИХ текстів правильних варіантів
+- confidence — твоя впевненість від 0.0 до 1.0
+- Відповідай ТІЛЬКИ JSON, без додаткового тексту`
+    } else {
+      prompt += `\nІНСТРУКЦІЯ:
 1. Уважно прочитай питання та всі варіанти відповідей
 2. Проаналізуй кожен варіант — який з них є правильним і чому
 3. Подумай крок за кроком (think step by step)
@@ -35,6 +52,7 @@ function buildPrompt(question: ParsedQuestion): string {
 - confidence — твоя впевненість від 0.0 до 1.0
 - reasoning — КОРОТКЕ пояснення (1-2 речення) чому цей варіант правильний
 - Відповідай ТІЛЬКИ JSON, без додаткового тексту`
+    }
   } else {
     prompt += `\nЦе відкрите питання. Відповідай JSON:
 {"reasoning": "<коротке пояснення>", "answer_text": "<твоя відповідь>", "confidence": <0.0-1.0>}
@@ -48,10 +66,17 @@ function buildPrompt(question: ParsedQuestion): string {
   return prompt
 }
 
+interface ParsedResponse {
+  answerIndex: number
+  answerIndices?: number[]
+  answerText: string
+  confidence: number
+}
+
 function parseAIResponseText(
   text: string,
   question: ParsedQuestion
-): { answerIndex: number; answerText: string; confidence: number } {
+): ParsedResponse {
   // Strip <think>...</think> tags from reasoning models (Qwen3, DeepSeek-R1)
   const cleanText = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
   const textToSearch = cleanText.length > 0 ? cleanText : text
@@ -60,9 +85,27 @@ function parseAIResponseText(
   if (startIdx !== -1 && endIdx > startIdx) {
     try {
       const parsed = JSON.parse(textToSearch.substring(startIdx, endIdx + 1))
+      const confidence = Math.min(1, Math.max(0, parsed.confidence ?? 0.5))
+
+      // Multi-select response
+      if (Array.isArray(parsed.answer_indices)) {
+        const indices = (parsed.answer_indices as number[]).filter(
+          (i) => i >= 0 && i < question.options.length
+        )
+        if (indices.length > 0) {
+          const texts = indices.map((i) => question.options[i].text)
+          return {
+            answerIndex: indices[0],
+            answerIndices: indices,
+            answerText: texts.join(", "),
+            confidence
+          }
+        }
+      }
+
+      // Single answer response
       const answerIndex = parsed.answer_index ?? -1
       const answerText = parsed.answer_text ?? ""
-      const confidence = Math.min(1, Math.max(0, parsed.confidence ?? 0.5))
 
       if (
         answerIndex >= 0 &&
@@ -247,6 +290,7 @@ async function queryModel(
     model: modelId,
     answer: parsed.answerText,
     answerIndex: parsed.answerIndex,
+    answerIndices: parsed.answerIndices,
     confidence: parsed.confidence,
     reasoning: responseText,
     responseTime: Date.now() - startTime
@@ -329,9 +373,33 @@ function buildConsensus(responses: AIResponse[]): ConsensusResult {
     best.avgConfidence * (0.5 + 0.5 * voteRatio)
   )
 
+  // For multi-select: merge answerIndices from all responses via majority voting
+  const hasMultiSelect = responses.some(
+    (r) => r.answerIndices && r.answerIndices.length > 1
+  )
+  let bestAnswerIndices: number[] | undefined
+  if (hasMultiSelect) {
+    const indexCounts = new Map<number, number>()
+    for (const r of responses) {
+      const indices = r.answerIndices || [r.answerIndex]
+      for (const idx of indices) {
+        indexCounts.set(idx, (indexCounts.get(idx) || 0) + 1)
+      }
+    }
+    const threshold = Math.ceil(responses.length / 2)
+    bestAnswerIndices = Array.from(indexCounts.entries())
+      .filter(([, count]) => count >= threshold)
+      .map(([idx]) => idx)
+      .sort((a, b) => a - b)
+    if (bestAnswerIndices.length === 0) {
+      bestAnswerIndices = responses[0].answerIndices || [best.answerIndex]
+    }
+  }
+
   return {
     bestAnswer: best.answer,
     bestAnswerIndex: best.answerIndex,
+    bestAnswerIndices,
     confidence: consensusConfidence,
     responses,
     votingDetails
@@ -408,6 +476,7 @@ async function queryGroqWithModel(
     model: "groq" as AIModel,
     answer: parsed.answerText,
     answerIndex: parsed.answerIndex,
+    answerIndices: parsed.answerIndices,
     confidence: parsed.confidence,
     reasoning: `[${modelName}] ${responseText}`,
     responseTime: Date.now() - startTime

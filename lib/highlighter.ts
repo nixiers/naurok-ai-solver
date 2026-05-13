@@ -34,16 +34,11 @@ function applyStyles(
   }
 }
 
-export function highlightAnswer(
-  question: ParsedQuestion,
-  result: ConsensusResult
+function highlightSingleOption(
+  option: { element: Element | null },
+  confidence: number
 ): void {
-  if (result.bestAnswerIndex < 0) return
-  if (result.bestAnswerIndex >= question.options.length) return
-
-  const option = question.options[result.bestAnswerIndex]
   if (!option.element) return
-
   const el = option.element as HTMLElement
 
   applyStyles(
@@ -56,7 +51,7 @@ export function highlightAnswer(
 
   const badge = document.createElement("span")
   badge.className = "naurok-ai-badge"
-  badge.textContent = `${Math.round(result.confidence * 100)}%`
+  badge.textContent = `${Math.round(confidence * 100)}%`
   applyStyles(
     badge,
     HIGHLIGHT_STYLES.badge as unknown as Record<string, string>
@@ -65,19 +60,22 @@ export function highlightAnswer(
   el.appendChild(badge)
 }
 
-export function autoSelectAnswer(
+export function highlightAnswer(
   question: ParsedQuestion,
-  result: ConsensusResult,
-  humanLike: boolean = true
+  result: ConsensusResult
 ): void {
-  if (result.bestAnswerIndex < 0) return
-  if (result.bestAnswerIndex >= question.options.length) return
+  const indices =
+    result.bestAnswerIndices && result.bestAnswerIndices.length > 0
+      ? result.bestAnswerIndices
+      : [result.bestAnswerIndex]
 
-  const option = question.options[result.bestAnswerIndex]
-  if (!option.element) return
+  for (const idx of indices) {
+    if (idx < 0 || idx >= question.options.length) continue
+    highlightSingleOption(question.options[idx], result.confidence)
+  }
+}
 
-  const el = option.element as HTMLElement
-
+function clickOption(el: HTMLElement, humanLike: boolean, delay: number): void {
   const clickTarget =
     el.querySelector('input[type="radio"]') ||
     el.querySelector('input[type="checkbox"]') ||
@@ -85,12 +83,31 @@ export function autoSelectAnswer(
     el
 
   if (humanLike) {
-    const delay = Math.random() * 500 + 200
     setTimeout(() => {
       ;(clickTarget as HTMLElement).click()
     }, delay)
   } else {
     ;(clickTarget as HTMLElement).click()
+  }
+}
+
+export function autoSelectAnswer(
+  question: ParsedQuestion,
+  result: ConsensusResult,
+  humanLike: boolean = true
+): void {
+  const indices =
+    result.bestAnswerIndices && result.bestAnswerIndices.length > 0
+      ? result.bestAnswerIndices
+      : [result.bestAnswerIndex]
+
+  let baseDelay = Math.random() * 500 + 200
+  for (const idx of indices) {
+    if (idx < 0 || idx >= question.options.length) continue
+    const option = question.options[idx]
+    if (!option.element) continue
+    clickOption(option.element as HTMLElement, humanLike, baseDelay)
+    baseDelay += Math.random() * 300 + 150
   }
 }
 
