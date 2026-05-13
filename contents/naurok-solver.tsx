@@ -104,6 +104,10 @@ function FloatingPanel() {
 
         const result: ConsensusResult = await new Promise(
           (resolve, reject) => {
+            const timeout = setTimeout(() => {
+              reject(new Error("AI request timed out"))
+            }, 30000)
+
             chrome.runtime.sendMessage(
               {
                 type: "SOLVE_QUESTION",
@@ -119,6 +123,7 @@ function FloatingPanel() {
                 mode: activeMode
               },
               (response) => {
+                clearTimeout(timeout)
                 if (chrome.runtime.lastError) {
                   reject(new Error(chrome.runtime.lastError.message))
                   return
@@ -157,6 +162,7 @@ function FloatingPanel() {
   )
 
   const solvingRef = useRef(false)
+  const solvingStartTimeRef = useRef(0)
 
   const solveLiveTest = useCallback(async () => {
     const liveProgress = getLiveTestingProgress()
@@ -183,9 +189,13 @@ function FloatingPanel() {
       currentQuestion: currentQ.text.substring(0, 50)
     })
 
-    const result = await solveOneQuestion(currentQ)
-    if (result) {
-      setSolvedQuestions((prev) => [...prev, result])
+    try {
+      const result = await solveOneQuestion(currentQ)
+      if (result) {
+        setSolvedQuestions((prev) => [...prev, result])
+      }
+    } catch {
+      // ignore errors, allow next question to be solved
     }
 
     setProgress({
@@ -201,15 +211,25 @@ function FloatingPanel() {
     const qs = parseQuestions()
     if (qs.length === 0) return
     const currentText = qs[0].text
-    if (currentText && currentText !== liveQuestionTextRef.current) {
-      liveQuestionTextRef.current = currentText
-      clearHighlights()
-      if (!solvingRef.current) {
-        solvingRef.current = true
-        solveLiveTest().finally(() => {
+    if (!currentText) return
+    if (currentText === liveQuestionTextRef.current) return
+
+    liveQuestionTextRef.current = currentText
+    clearHighlights()
+
+    // Force reset solvingRef if it's been stuck for > 15 seconds
+    if (solvingRef.current && Date.now() - solvingStartTimeRef.current > 15000) {
+      solvingRef.current = false
+    }
+
+    if (!solvingRef.current) {
+      solvingRef.current = true
+      solvingStartTimeRef.current = Date.now()
+      solveLiveTest()
+        .catch(() => {})
+        .finally(() => {
           solvingRef.current = false
         })
-      }
     }
   }, [solveLiveTest])
 
@@ -221,15 +241,12 @@ function FloatingPanel() {
     const target = document.querySelector(".test-container-inner") || document.querySelector(".v-test-go-body") || document.querySelector(".v-test-question") || document.body
     observer.observe(target, { childList: true, subtree: true, characterData: true })
 
-    // Polling fallback for vseosvita (Vue reuses DOM elements, MutationObserver may miss changes)
-    let pollInterval: ReturnType<typeof setInterval> | null = null
-    if (isVseosvitaPage()) {
-      pollInterval = setInterval(() => checkForNewQuestion(), 1000)
-    }
+    // Polling every 800ms — catches Vue reactivity changes that MutationObserver misses
+    const pollInterval = setInterval(() => checkForNewQuestion(), 800)
 
     return () => {
       observer.disconnect()
-      if (pollInterval) clearInterval(pollInterval)
+      clearInterval(pollInterval)
     }
   }, [checkForNewQuestion])
 
