@@ -210,7 +210,7 @@ function FloatingPanel() {
   const checkForNewQuestion = useCallback(() => {
     const qs = parseQuestions()
     if (qs.length === 0) return
-    const currentText = qs[0].text
+    const currentText = qs[0].text || qs[0].imageUrl || ""
     if (!currentText) return
     if (currentText === liveQuestionTextRef.current) return
 

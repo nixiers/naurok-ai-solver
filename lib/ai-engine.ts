@@ -11,15 +11,19 @@ import type {
 import { AI_MODELS } from "./types"
 
 function buildPrompt(question: ParsedQuestion): string {
-  let prompt = `Ти — експерт з українських шкільних та університетських тестів. Відповідай ТОЧНО та ПРАВИЛЬНО.
+  const hasImages = !!(question.imageUrl || question.options.some((o) => o.imageUrl))
+  const imageNote = hasImages ? "\n\nУВАГА: Це питання містить зображення. Уважно розглянь зображення для розуміння питання та варіантів відповідей." : ""
 
-Питання: ${question.text}
+  let prompt = `Ти — експерт з українських шкільних та університетських тестів. Відповідай ТОЧНО та ПРАВИЛЬНО.${imageNote}
+
+Питання: ${question.text || "[Див. зображення]"}
 `
 
   if (question.options.length > 0) {
     prompt += "\nВаріанти відповідей:\n"
     question.options.forEach((opt, i) => {
-      prompt += `${i}: ${opt.text}\n`
+      const optText = opt.text || (opt.imageUrl ? "[Зображення]" : "[Порожній варіант]")
+      prompt += `${i}: ${optText}\n`
     })
 
     if (question.type === "multiple_select") {
@@ -78,7 +82,11 @@ function parseAIResponseText(
   question: ParsedQuestion
 ): ParsedResponse {
   // Strip <think>...</think> tags from reasoning models (Qwen3, DeepSeek-R1)
-  const cleanText = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+  let cleanText = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim()
+  // Handle truncated think blocks (no closing tag)
+  if (cleanText.includes("<think>")) {
+    cleanText = cleanText.replace(/<think>[\s\S]*/g, "").trim()
+  }
   const textToSearch = cleanText.length > 0 ? cleanText : text
   const startIdx = textToSearch.indexOf("{")
   const endIdx = textToSearch.lastIndexOf("}")
@@ -158,6 +166,32 @@ function parseAIResponseText(
   return { answerIndex: -1, answerText: text.trim(), confidence: 0.3 }
 }
 
+async function fetchImageAsBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url)
+    if (!response.ok) return null
+    const buffer = await response.arrayBuffer()
+    const bytes = new Uint8Array(buffer)
+    let binary = ""
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+    const contentType = response.headers.get("content-type") || "image/jpeg"
+    return `data:${contentType};base64,${btoa(binary)}`
+  } catch {
+    return null
+  }
+}
+
+function collectImageUrls(question: ParsedQuestion): string[] {
+  const urls: string[] = []
+  if (question.imageUrl) urls.push(question.imageUrl)
+  for (const opt of question.options) {
+    if (opt.imageUrl) urls.push(opt.imageUrl)
+  }
+  return urls
+}
+
 async function callOpenAICompatible(
   config: AIModelConfig,
   apiKey: string,
@@ -180,7 +214,7 @@ async function callOpenAICompatible(
         { role: "user", content: prompt }
       ],
       temperature: 0,
-      max_tokens: 500
+      max_tokens: 2048
     })
   })
 
@@ -432,6 +466,31 @@ const GROQ_CONSENSUS_MODELS = [
   "llama-3.3-70b-versatile"
 ]
 
+const VISION_CAPABLE_MODELS = [
+  "meta-llama/llama-4-scout-17b-16e-instruct",
+  "llama-3.2-11b-vision-preview"
+]
+
+function isVisionModel(modelName: string): boolean {
+  return VISION_CAPABLE_MODELS.some((m) => modelName.includes(m) || m.includes(modelName))
+}
+
+async function buildMultimodalContent(
+  prompt: string,
+  imageUrls: string[]
+): Promise<Array<{ type: string; text?: string; image_url?: { url: string } }>> {
+  const parts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [
+    { type: "text", text: prompt }
+  ]
+  for (const url of imageUrls) {
+    const base64 = await fetchImageAsBase64(url)
+    if (base64) {
+      parts.push({ type: "image_url", image_url: { url: base64 } })
+    }
+  }
+  return parts
+}
+
 async function queryGroqWithModel(
   modelName: string,
   question: ParsedQuestion,
@@ -439,6 +498,19 @@ async function queryGroqWithModel(
 ): Promise<AIResponse> {
   const prompt = buildPrompt(question)
   const startTime = Date.now()
+
+  const imageUrls = collectImageUrls(question)
+  const hasImages = imageUrls.length > 0
+  const canSeeImages = isVisionModel(modelName)
+
+  let userContent: string | Array<{ type: string; text?: string; image_url?: { url: string } }> = prompt
+  if (hasImages && canSeeImages) {
+    userContent = await buildMultimodalContent(prompt, imageUrls)
+  }
+
+  const systemPrompt = hasImages && canSeeImages
+    ? "Ти — експерт з українських шкільних предметів. Уважно розглянь зображення та текст питання. Відповідай ТІЛЬКИ у форматі JSON. Думай крок за кроком перед відповіддю. Будь максимально точним."
+    : "Ти — експерт з українських шкільних предметів. Відповідай ТІЛЬКИ у форматі JSON. Думай крок за кроком перед відповіддю. Будь максимально точним."
 
   const response = await fetch(
     "https://api.groq.com/openai/v1/chat/completions",
@@ -451,15 +523,11 @@ async function queryGroqWithModel(
       body: JSON.stringify({
         model: modelName,
         messages: [
-          {
-            role: "system",
-            content:
-              "Ти — експерт з українських шкільних предметів. Відповідай ТІЛЬКИ у форматі JSON. Думай крок за кроком перед відповіддю. Будь максимально точним."
-          },
-          { role: "user", content: prompt }
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userContent }
         ],
         temperature: 0,
-        max_tokens: 2048
+        max_tokens: 4096
       })
     }
   )

@@ -185,7 +185,12 @@ function parseVseosvitaLivePage(): ParsedQuestion[] {
     }
   }
 
-  if (!questionText) return questions
+  // Allow image-only questions
+  const vseosvitaImg = searchRoot.querySelector("img") as HTMLImageElement | null
+  if (!questionText && !vseosvitaImg) return questions
+  if (!questionText && vseosvitaImg) {
+    questionText = vseosvitaImg.alt || ""
+  }
 
   const options: QuestionOption[] = []
   const optionSelectors = [
@@ -276,8 +281,12 @@ function parsePreviewPage(): ParsedQuestion[] {
 
     if (!contentEl) return
 
-    const questionText = getTextContent(contentEl)
-    if (!questionText) return
+    let questionText = getTextContent(contentEl)
+    const contentImg = contentEl.querySelector("img") as HTMLImageElement | null
+    if (!questionText && !contentImg) return
+    if (!questionText && contentImg) {
+      questionText = contentImg.alt || ""
+    }
 
     const options: QuestionOption[] = []
     if (optionsContainer) {
@@ -289,7 +298,7 @@ function parsePreviewPage(): ParsedQuestion[] {
         const imgEl = optEl.querySelector("img")
         options.push({
           index: optIndex,
-          text: getTextContent(textEl),
+          text: getTextContent(textEl) || (imgEl?.alt || ""),
           element: optEl,
           imageUrl: imgEl?.src
         })
@@ -297,7 +306,6 @@ function parsePreviewPage(): ParsedQuestion[] {
     }
 
     const questionType = detectQuestionType(el, options)
-    const imgEl = contentEl.querySelector("img")
 
     questions.push({
       id: generateId(),
@@ -305,7 +313,7 @@ function parsePreviewPage(): ParsedQuestion[] {
       type: questionType,
       text: questionText,
       options,
-      imageUrl: imgEl?.src,
+      imageUrl: contentImg?.src,
       element: el
     })
   })
@@ -321,10 +329,17 @@ function parseLiveTestingPage(): ParsedQuestion[] {
   )
   if (!questionContentEl) return questions
 
-  const questionText = getTextContent(
+  let questionText = getTextContent(
     document.querySelector(".test-content-text-inner") || questionContentEl
   )
-  if (!questionText) return questions
+
+  const questionImgCheck = document.querySelector(
+    ".test-content-image img, .test-question-content img"
+  ) as HTMLImageElement | null
+  if (!questionText && !questionImgCheck) return questions
+  if (!questionText && questionImgCheck) {
+    questionText = questionImgCheck.alt || ""
+  }
 
   const optionEls = document.querySelectorAll(
     ".question-option-inner, .question-option-inner-multiple"
@@ -335,12 +350,13 @@ function parseLiveTestingPage(): ParsedQuestion[] {
   optionEls.forEach((optEl, optIndex) => {
     const contentEl = optEl.querySelector(".question-option-inner-content")
     const text = getTextContent(contentEl || optEl)
-    if (text && text.length > 0) {
+    const optImg = (optEl.querySelector(".question-option-image img, img") as HTMLImageElement | null)
+    if ((text && text.length > 0) || optImg?.src) {
       options.push({
         index: optIndex,
-        text,
+        text: text || (optImg?.alt || ""),
         element: optEl,
-        imageUrl: (optEl.querySelector(".question-option-image img") as HTMLImageElement | null)?.src
+        imageUrl: optImg?.src
       })
     }
   })
@@ -351,17 +367,13 @@ function parseLiveTestingPage(): ParsedQuestion[] {
     ? "multiple_select"
     : detectQuestionType(questionContentEl, options)
 
-  const questionImgEl = document.querySelector(
-    ".test-content-image img"
-  ) as HTMLImageElement | null
-
   questions.push({
     id: generateId(),
     index: 0,
     type: questionType,
     text: questionText,
     options,
-    imageUrl: questionImgEl?.src,
+    imageUrl: questionImgCheck?.src,
     element: document.querySelector(".test-container-inner") || questionContentEl
   })
 
